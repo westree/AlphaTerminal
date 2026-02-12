@@ -1,0 +1,22 @@
+name = "tdnet-ai-reporter"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 静的アセット配信
+[assets]
+directory = "./public"
+
+# D1 データベースバインディング
+[[d1_databases]]
+binding = "DB"
+database_name = "tdnet-reports"
+database_id = "29b3578d-5263-4b97-9ca9-198f7968683f"
+
+# 環境変数（シークレットは `npx wrangler secret put GOOGLE_API_KEY` で設定）
+[vars]
+ENVIRONMENT = "production"
+
+# Cron トリガー（10分ごと）
+[triggers]
+crons = ["*/10 * * * *"]

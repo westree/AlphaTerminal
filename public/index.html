@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ja" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>決算短信AI速報 | TDNet Monitor</title>
+  <meta name="description" content="TDnetの決算短信をAIが自動分析。増収増益銘柄を瞬時にキャッチ。" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'Noto Sans JP', 'sans-serif'],
+          },
+          colors: {
+            dark: {
+              50:  '#f8fafc',
+              100: '#e2e8f0',
+              200: '#cbd5e1',
+              300: '#94a3b8',
+              400: '#64748b',
+              500: '#475569',
+              600: '#334155',
+              700: '#1e293b',
+              800: '#0f172a',
+              900: '#020617',
+            },
+            accent: {
+              green:  '#10b981',
+              red:    '#ef4444',
+              blue:   '#3b82f6',
+              amber:  '#f59e0b',
+              purple: '#8b5cf6',
+            },
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body {
+      font-family: 'Inter', 'Noto Sans JP', sans-serif;
+      background: linear-gradient(135deg, #020617 0%, #0f172a 50%, #1e293b 100%);
+      min-height: 100vh;
+    }
+
+    .glass-card {
+      background: rgba(30, 41, 59, 0.6);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(148, 163, 184, 0.1);
+    }
+
+    .double-growth-card {
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.08), inset 0 1px 0 rgba(16, 185, 129, 0.1);
+    }
+
+    .shimmer {
+      background: linear-gradient(90deg, transparent 0%, rgba(148,163,184,0.05) 50%, transparent 100%);
+      background-size: 200% 100%;
+      animation: shimmer 2s infinite;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 8px rgba(16, 185, 129, 0.2); }
+      50% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); }
+    }
+
+    .pulse-glow {
+      animation: pulse-glow 3s ease-in-out infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .spinner {
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes fade-up {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .fade-up {
+      animation: fade-up 0.4s ease-out forwards;
+    }
+
+    .stat-badge {
+      font-variant-numeric: tabular-nums;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.2); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.3); }
+  </style>
+</head>
+<body class="text-slate-200 antialiased">
+
+<div id="app">
+  <!-- ヘッダー -->
+  <header class="sticky top-0 z-50 glass-card border-b border-slate-700/50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+              決算短信AI速報
+            </h1>
+            <p class="text-xs text-slate-500 -mt-0.5">TDNet Monitor — Powered by Gemini</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <!-- フィルターボタン -->
+          <div class="flex gap-1 p-1 rounded-lg bg-slate-800/50 border border-slate-700/50">
+            <button
+              @click="setFilter('all')"
+              :class="filter === 'all' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-300'"
+              class="px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200"
+            >すべて</button>
+            <button
+              @click="setFilter('double_growth')"
+              :class="filter === 'double_growth' ? 'bg-emerald-600/80 text-white shadow shadow-emerald-500/20' : 'text-slate-400 hover:text-slate-300'"
+              class="px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200"
+            >🚀 増収増益</button>
+          </div>
+
+          <!-- ステータス -->
+          <div class="flex items-center gap-2 text-xs text-slate-500">
+            <div v-if="loading" class="flex items-center gap-1.5 text-amber-400">
+              <svg class="w-3.5 h-3.5 spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              <span class="font-medium">更新中...</span>
+            </div>
+            <div v-else class="flex items-center gap-1.5 text-emerald-500">
+              <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow shadow-emerald-500/50"></div>
+              <span>{{ reports.length }}件</span>
+            </div>
+          </div>
+
+          <!-- 更新ボタン -->
+          <button
+            @click="fetchReports"
+            :disabled="loading"
+            class="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/50 transition-all duration-200 disabled:opacity-50"
+            title="データを更新"
+          >
+            <svg class="w-4 h-4" :class="{ spinner: loading }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- 統計サマリー -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6" v-if="!loading && reports.length > 0">
+      <div class="glass-card rounded-xl p-4">
+        <div class="text-xs text-slate-500 font-medium mb-1">合計件数</div>
+        <div class="text-2xl font-bold text-white stat-badge">{{ reports.length }}</div>
+      </div>
+      <div class="glass-card rounded-xl p-4 double-growth-card">
+        <div class="text-xs text-emerald-400/80 font-medium mb-1">🚀 増収増益</div>
+        <div class="text-2xl font-bold text-emerald-400 stat-badge">{{ doubleGrowthCount }}</div>
+      </div>
+      <div class="glass-card rounded-xl p-4">
+        <div class="text-xs text-slate-500 font-medium mb-1">平均売上増減</div>
+        <div class="text-2xl font-bold stat-badge" :class="avgSales >= 0 ? 'text-emerald-400' : 'text-red-400'">
+          {{ avgSales !== null ? (avgSales >= 0 ? '+' : '') + avgSales.toFixed(1) + '%' : '—' }}
+        </div>
+      </div>
+      <div class="glass-card rounded-xl p-4">
+        <div class="text-xs text-slate-500 font-medium mb-1">平均利益増減</div>
+        <div class="text-2xl font-bold stat-badge" :class="avgProfit >= 0 ? 'text-emerald-400' : 'text-red-400'">
+          {{ avgProfit !== null ? (avgProfit >= 0 ? '+' : '') + avgProfit.toFixed(1) + '%' : '—' }}
+        </div>
+      </div>
+    </div>
+
+    <!-- エラー表示 -->
+    <div v-if="error" class="glass-card rounded-xl p-6 mb-6 border border-red-500/30">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
+          <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold text-red-400">データ取得エラー</h3>
+          <p class="text-xs text-slate-400 mt-0.5">{{ error }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ローディングスケルトン -->
+    <div v-if="loading" class="space-y-3">
+      <div v-for="n in 6" :key="n" class="glass-card rounded-xl p-5 shimmer" :style="{ animationDelay: (n * 0.1) + 's' }">
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-lg bg-slate-700/50"></div>
+          <div class="flex-1 space-y-3">
+            <div class="h-4 bg-slate-700/50 rounded w-1/3"></div>
+            <div class="h-3 bg-slate-700/30 rounded w-2/3"></div>
+            <div class="h-3 bg-slate-700/20 rounded w-1/2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 空状態 -->
+    <div v-else-if="reports.length === 0" class="glass-card rounded-xl p-16 text-center">
+      <div class="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center mx-auto mb-4">
+        <svg class="w-8 h-8 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+      </div>
+      <h3 class="text-base font-semibold text-slate-300 mb-1">データがありません</h3>
+      <p class="text-sm text-slate-500">決算短信が取得されると、ここに表示されます。</p>
+    </div>
+
+    <!-- レポート一覧 -->
+    <div v-else class="space-y-3">
+      <div
+        v-for="(report, index) in reports"
+        :key="report.id"
+        class="fade-up rounded-xl p-5 transition-all duration-300 hover:scale-[1.005] cursor-default"
+        :class="report.is_double_growth ? 'glass-card double-growth-card pulse-glow' : 'glass-card hover:border-slate-600/50'"
+        :style="{ animationDelay: (index * 0.05) + 's' }"
+      >
+        <div class="flex items-start gap-4">
+          <!-- 左アイコン -->
+          <div
+            class="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 font-bold text-sm"
+            :class="report.is_double_growth
+              ? 'bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 text-emerald-400 border border-emerald-500/30'
+              : 'bg-slate-800 text-slate-400 border border-slate-700/50'"
+          >
+            {{ report.code }}
+          </div>
+
+          <!-- メインコンテンツ -->
+          <div class="flex-1 min-w-0">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h3 class="text-sm font-semibold text-white truncate">{{ report.name }}</h3>
+                  <span v-if="report.is_double_growth"
+                    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    🚀 増収増益
+                  </span>
+                </div>
+                <p class="text-xs text-slate-500 mt-0.5 truncate">{{ report.title }}</p>
+              </div>
+
+              <!-- 指標バッジ -->
+              <div class="flex gap-2 flex-shrink-0">
+                <div class="text-right">
+                  <div class="text-[10px] text-slate-500 font-medium">売上</div>
+                  <div class="text-sm font-bold stat-badge"
+                    :class="report.sales_pct > 0 ? 'text-emerald-400' : report.sales_pct < 0 ? 'text-red-400' : 'text-slate-500'">
+                    {{ report.sales_pct !== null ? (report.sales_pct >= 0 ? '+' : '') + report.sales_pct.toFixed(1) + '%' : '—' }}
+                  </div>
+                </div>
+                <div class="w-px bg-slate-700/50"></div>
+                <div class="text-right">
+                  <div class="text-[10px] text-slate-500 font-medium">利益</div>
+                  <div class="text-sm font-bold stat-badge"
+                    :class="report.profit_pct > 0 ? 'text-emerald-400' : report.profit_pct < 0 ? 'text-red-400' : 'text-slate-500'">
+                    {{ report.profit_pct !== null ? (report.profit_pct >= 0 ? '+' : '') + report.profit_pct.toFixed(1) + '%' : '—' }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- AI要約 -->
+            <p v-if="report.summary" class="text-xs text-slate-400 mt-2 leading-relaxed">
+              <span class="text-purple-400 font-medium">AI:</span> {{ report.summary }}
+            </p>
+
+            <!-- フッター -->
+            <div class="flex items-center justify-between mt-3">
+              <span class="text-[10px] text-slate-600">{{ formatDate(report.created_at) }}</span>
+              <a
+                v-if="report.pdf_url"
+                :href="report.pdf_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium text-slate-400 bg-slate-800/50 border border-slate-700/50 hover:border-slate-600 hover:text-slate-300 transition-all duration-200"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                PDF
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- フッター -->
+  <footer class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 mt-4">
+    <div class="flex items-center justify-between text-xs text-slate-600 border-t border-slate-800 pt-6">
+      <span>TDNet AI Reporter — Cloudflare Workers + D1 + Gemini 1.5 Flash</span>
+      <span>10分ごとに自動更新</span>
+    </div>
+  </footer>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+
+createApp({
+  setup() {
+    const reports = ref([]);
+    const loading = ref(true);
+    const error = ref(null);
+    const filter = ref('all');
+
+    // API エンドポイント（同一オリジン）
+    const API_BASE = '/api';
+
+    const doubleGrowthCount = computed(() =>
+      reports.value.filter(r => r.is_double_growth).length
+    );
+
+    const avgSales = computed(() => {
+      const valid = reports.value.filter(r => r.sales_pct !== null);
+      if (valid.length === 0) return null;
+      return valid.reduce((s, r) => s + r.sales_pct, 0) / valid.length;
+    });
+
+    const avgProfit = computed(() => {
+      const valid = reports.value.filter(r => r.profit_pct !== null);
+      if (valid.length === 0) return null;
+      return valid.reduce((s, r) => s + r.profit_pct, 0) / valid.length;
+    });
+
+    function formatDate(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      return d.toLocaleString('ja-JP', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+
+    async function fetchReports() {
+      loading.value = true;
+      error.value = null;
+      try {
+        const params = new URLSearchParams({ limit: '50' });
+        if (filter.value === 'double_growth') {
+          params.set('filter', 'double_growth');
+        }
+        const res = await fetch(`${API_BASE}/reports?${params}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        reports.value = json.data || [];
+      } catch (e) {
+        error.value = e.message || 'データの取得に失敗しました';
+        console.error('Fetch error:', e);
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    function setFilter(f) {
+      filter.value = f;
+      fetchReports();
+    }
+
+    onMounted(() => {
+      fetchReports();
+      // 60秒ごとに自動更新
+      setInterval(fetchReports, 60_000);
+    });
+
+    return {
+      reports, loading, error, filter,
+      doubleGrowthCount, avgSales, avgProfit,
+      formatDate, fetchReports, setFilter,
+    };
+  },
+}).mount('#app');
+</script>
+</body>
+</html>

@@ -78,47 +78,74 @@ const TDNET_URL = "https://www.release.tdnet.info/inbs/I_main_00.html";
 const TDNET_BASE = "https://www.release.tdnet.info/inbs/";
 
 async function scrapeTdnet(): Promise<TdnetItem[]> {
-    const res = await fetch(TDNET_URL, {
+    // 1. メインページを取得して iframe の URL を特定
+    const resMain = await fetch(TDNET_URL, {
         headers: {
             "User-Agent":
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            Accept: "text/html,application/xhtml+xml",
         },
     });
 
-    if (!res.ok) {
-        throw new Error(`TDnet fetch failed: ${res.status}`);
+    if (!resMain.ok) {
+        throw new Error(`TDnet main fetch failed: ${resMain.status}`);
     }
 
-    const html = await res.text();
-    const $ = cheerio.load(html);
+    const htmlMain = await resMain.text();
+    const $main = cheerio.load(htmlMain);
+    const iframeSrc = $main("#main_list").attr("src");
+
+    if (!iframeSrc) {
+        throw new Error("TDnet iframe not found");
+    }
+
+    const listUrl = TDNET_BASE + iframeSrc;
+    console.log(`[Scrape] Fetching list from: ${listUrl}`);
+
+    // 2. リストページを取得
+    const resList = await fetch(listUrl, {
+        headers: {
+            "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+    });
+
+    if (!resList.ok) {
+        throw new Error(`TDnet list fetch failed: ${resList.status}`);
+    }
+
+    const htmlList = await resList.text();
+    const $ = cheerio.load(htmlList);
     const items: TdnetItem[] = [];
 
     // TDnet の各行を解析
     $("tr").each((_, row) => {
         const $row = $(row);
         const cells = $row.find("td");
+        // クラス名や構造が変わっている可能性があるので、セル数で簡易チェック
         if (cells.length < 4) return;
 
         // PDF リンクを探す
-        const pdfLink = $row.find('a[href$=".pdf"]');
+        const pdfLink = $row.find('a[href*=".pdf"]');
         if (pdfLink.length === 0) return;
 
         const href = pdfLink.attr("href") || "";
         const pdfUrl = href.startsWith("http") ? href : TDNET_BASE + href;
 
         // 証券コードの取得（通常1列目付近）
-        const codeText = cells.eq(1).text().trim();
-        const codeMatch = codeText.match(/(\d{4,5})/);
-        if (!codeMatch) return;
+        const codeText = cells.eq(0).text().trim(); // 列位置が変わる可能性も考慮して調整必要か？
+        // 通常のTDnetリスト構造:
+        // [0] 時刻 [1] コード [2] 会社名 [3] 表題 [4] XBRL等
 
-        const code = codeMatch[1];
-        const name = cells.eq(2).text().trim();
-        const title = pdfLink.text().trim() || cells.eq(3).text().trim();
         const time = cells.eq(0).text().trim();
+        const code = cells.eq(1).text().trim().substring(0, 4); // 4桁コード抽出
+        const name = cells.eq(2).text().trim();
+        const title = cells.eq(3).text().trim(); // PDFリンクでない場合もあるのでセルから取得
 
         // 決算短信のみフィルタ（タイトルに「決算短信」を含むもの）
         if (!title.includes("決算短信") && !title.includes("決算")) return;
+
+        // コードが数字でない場合はスキップ（ヘッダー行など）
+        if (!/^\d{4}$/.test(code)) return;
 
         const id = `${code}_${time.replace(/[\s:\/]/g, "")}`;
 
@@ -134,7 +161,7 @@ async function analyzePdfWithGemini(
     apiKey: string
 ): Promise<GeminiAnalysis> {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
     // PDF を Base64 エンコード
     const uint8 = new Uint8Array(pdfBuffer);

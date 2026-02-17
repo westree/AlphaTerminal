@@ -68,17 +68,107 @@ MOCK_DISCLOSURES = [
     }
 ]
 
-def scrape_tdnet():
-    # Placeholder for actual scraping logic
-    # Returning empty list to force fallback to mock data for now
-    # to avoid errors on first run without internet access verification
-    return []
+def scrape_tdnet(date_str):
+    # TDnet URL construction
+    url = f"https://www.release.tdnet.info/inbs/I_list_001_{date_str}.html"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+
+    print(f"Fetching TDnet: {url}")
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        # Handle encoding (TDnet is usually Shift_JIS or UTF-8, requests automagic is sometimes off)
+        response.encoding = response.apparent_encoding 
+        
+        if response.status_code != 200:
+            print(f"Failed to fetch TDnet: {response.status_code}")
+            return []
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        disclosures = []
+        
+        # Locate the main table rows. 
+        # TDnet structure often has rows with specific classes or structure.
+        # This selector targets rows in the main list table.
+        # Adjust selector based on inspection if needed. 
+        # Usually it's inside a table with id="main-list-table" or similar, or just by row structure.
+        # Let's try iterating through all TRs and finding robust data.
+        
+        rows = soup.find_all('tr') 
+        
+        for row in rows:
+            cols = row.find_all('td')
+            # Typical row validation: Needs time, code, name, title
+            if len(cols) >= 4:
+                # TDnet columns are roughly: Time | Code | Name | Title | ...
+                # Let's safely extract text
+                try:
+                    time_str = cols[0].get_text(strip=True)
+                    code = cols[1].get_text(strip=True)
+                    company_name = cols[2].get_text(strip=True)
+                    title_element = cols[3].find('a')
+                    
+                    if not title_element:
+                        # Sometimes title is just text
+                        title = cols[3].get_text(strip=True)
+                        pdf_link = "#"
+                    else:
+                        title = title_element.get_text(strip=True)
+                        href = title_element.get('href')
+                        # Construct full PDF URL
+                        # href is relative like "001_20260218_xxxx.pdf"
+                        # Base URL for PDFs is https://www.release.tdnet.info/inbs/
+                        if href and not href.startswith('http'):
+                             pdf_link = f"https://www.release.tdnet.info/inbs/{href}"
+                        else:
+                             pdf_link = href if href else "#"
+
+                    # Basic format validation (Time should be HH:mm)
+                    if not re.match(r"\d{2}:\d{2}", time_str):
+                        continue
+                        
+                    # Generate a unique ID
+                    doc_id = f"{date_str}-{code}-{time_str}-{random.randint(1000,9999)}"
+
+                    # Mock AI Analysis (Pending integration)
+                    # For now, randomly assign status to simulate mix
+                    disclosures.append({
+                        "id": doc_id,
+                        "time": time_str,
+                        "code": code,
+                        "companyName": company_name,
+                        "title": title,
+                        "url": pdf_link,
+                        "aiStatus": "pending", 
+                        "importance": "low", # Default to low until analyzed
+                        "sentiment": "neutral",
+                        "summary": "Waiting for AI analysis...",
+                        "tags": []
+                    })
+                except Exception as row_err:
+                    print(f"Error parsing row: {row_err}")
+                    continue
+        
+        print(f"Scraped {len(disclosures)} items from TDnet.")
+        return disclosures
+
+    except Exception as e:
+        print(f"Error scraping TDnet: {e}")
+        return []
 
 @app.get("/api/disclosures", response_model=List[Disclosure])
 def get_disclosures():
-    # Try scraping
-    real_data = scrape_tdnet()
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    real_data = scrape_tdnet(today)
     
+    if not real_data:
+        # If no data for today (e.g., early morning), try yesterday
+        yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y%m%d")
+        print(f"No data for {today}, trying {yesterday}...")
+        real_data = scrape_tdnet(yesterday)
+
     if real_data:
         return real_data
     

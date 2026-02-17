@@ -1,6 +1,27 @@
-node_modules/
-.wrangler/
-.dev.vars
-dist/
+# General
 .DS_Store
 *.log
+
+# Node.js
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env
+
+# Next.js (handled by frontend/.gitignore mostly, but good to be safe)
+.next/
+out/
+build/
+
+# Backup files
+*.bak
+*_bak/

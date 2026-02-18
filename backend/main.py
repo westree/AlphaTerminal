@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -7,8 +7,15 @@ from bs4 import BeautifulSoup
 import datetime
 import random
 import re
+import json
+import os
+import time
+from ai_agent import AIAgent  # Import AI Agent
 
 app = FastAPI(title="AlphaTerminal Backend")
+
+# Initialize AI Agent
+ai_agent = AIAgent()
 
 # CORS setup
 origins = [
@@ -39,37 +46,71 @@ class Disclosure(BaseModel):
     tags: List[str]
 
 # Mock Data
-MOCK_DISCLOSURES = [
-    {
-        "id": "mock_1",
-        "time": "15:30",
-        "code": "7203",
-        "companyName": "Toyota Motor",
-        "title": "Consolidated Financial Results for FY2026 Q3 (Mock Backend Data)",
-        "url": "#",
-        "aiStatus": "done",
-        "importance": "high",
-        "sentiment": "positive",
-        "summary": "Record revenue and operating profit. FY guidance upgraded.",
-        "tags": ["Earnings", "Upward Revision"]
-    },
-    {
-        "id": "mock_2",
-        "time": "15:00",
-        "code": "9984",
-        "companyName": "SoftBank Group",
-        "title": "Notice Regarding Share Buyback (Mock Backend Data)",
-        "url": "#",
-        "aiStatus": "done",
-        "importance": "high",
-        "sentiment": "positive",
-        "summary": "Announced 500 billion yen share buyback program.",
-        "tags": ["Buyback"]
-    }
-]
+# Persistence Setup
+DATA_FILE = "disclosures.json"
+
+def load_data():
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading data: {e}")
+    return []
+
+def save_data(data):
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Error saving data: {e}")
+
+# In-memory store (initialized from file)
+DISCLOSURE_STORE = load_data()
+
+def process_analysis_queue():
+    """Background task to process pending analyses sequentially."""
+    global DISCLOSURE_STORE
+    
+    print("Starting background analysis...")
+    
+    # Simple queue processing: iterate and find pending items
+    # In a real app, use a proper queue (Celery/Redis), but loop is fine here for local
+    
+    updated = False
+    for item in DISCLOSURE_STORE:
+        if item.get("aiStatus") == "pending" and item.get("url") != "#":
+            print(f"Analyzing {item['code']} {item['companyName']}...")
+            try:
+                # Add delay to be nice to local machine if needed, but user said "go fast"
+                # time.sleep(1) 
+                
+                pdf_response = requests.get(item["url"], headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+                if pdf_response.status_code == 200:
+                    pdf_text = ai_agent.extract_text_from_pdf(pdf_response.content)
+                    if pdf_text:
+                        ai_result = ai_agent.analyze_disclosure(pdf_text)
+                        
+                        # Update item
+                        item.update(ai_result)
+                        item["aiStatus"] = ai_result.get("aiStatus", "done")
+                        updated = True
+                        
+                        # Save progress immediately so we don't lose it on crash
+                        save_data(DISCLOSURE_STORE)
+                        
+            except Exception as e:
+                print(f"Error analyzing {item['code']}: {e}")
+                item["aiStatus"] = "error"
+                item["summary"] = "Analysis failed."
+                save_data(DISCLOSURE_STORE)
+    
+    if updated:
+        print("Batch analysis complete.")
 
 def scrape_tdnet(date_str):
-    # TDnet URL construction
+    global DISCLOSURE_STORE
+    
     url = f"https://www.release.tdnet.info/inbs/I_list_001_{date_str}.html"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -79,101 +120,104 @@ def scrape_tdnet(date_str):
 
     try:
         response = requests.get(url, headers=headers, timeout=10)
-        # Handle encoding (TDnet is usually Shift_JIS or UTF-8, requests automagic is sometimes off)
         response.encoding = response.apparent_encoding 
         
         if response.status_code != 200:
-            print(f"Failed to fetch TDnet: {response.status_code}")
             return []
 
         soup = BeautifulSoup(response.text, 'html.parser')
-        disclosures = []
-        
-        # Locate the main table rows. 
-        # TDnet structure often has rows with specific classes or structure.
-        # This selector targets rows in the main list table.
-        # Adjust selector based on inspection if needed. 
-        # Usually it's inside a table with id="main-list-table" or similar, or just by row structure.
-        # Let's try iterating through all TRs and finding robust data.
-        
         rows = soup.find_all('tr') 
         
+        new_items = []
+        
+        # Check existing IDs to avoid duplicates
+        existing_ids = {item["id"].split("-")[0] + "-" + item["code"] + "-" + item["time"] for item in DISCLOSURE_STORE}
+
         for row in rows:
             cols = row.find_all('td')
-            # Typical row validation: Needs time, code, name, title
             if len(cols) >= 4:
-                # TDnet columns are roughly: Time | Code | Name | Title | ...
-                # Let's safely extract text
                 try:
                     time_str = cols[0].get_text(strip=True)
                     code = cols[1].get_text(strip=True)
                     company_name = cols[2].get_text(strip=True)
                     title_element = cols[3].find('a')
                     
+                    pdf_link = "#"
                     if not title_element:
-                        # Sometimes title is just text
                         title = cols[3].get_text(strip=True)
-                        pdf_link = "#"
                     else:
                         title = title_element.get_text(strip=True)
                         href = title_element.get('href')
-                        # Construct full PDF URL
-                        # href is relative like "001_20260218_xxxx.pdf"
-                        # Base URL for PDFs is https://www.release.tdnet.info/inbs/
                         if href and not href.startswith('http'):
                              pdf_link = f"https://www.release.tdnet.info/inbs/{href}"
                         else:
                              pdf_link = href if href else "#"
 
-                    # Basic format validation (Time should be HH:mm)
                     if not re.match(r"\d{2}:\d{2}", time_str):
                         continue
-                        
-                    # Generate a unique ID
-                    doc_id = f"{date_str}-{code}-{time_str}-{random.randint(1000,9999)}"
+                     
+                    # Simple unique check key
+                    unique_key = f"{date_str}-{code}-{time_str}"
+                    
+                    if unique_key in existing_ids:
+                        continue
 
-                    # Mock AI Analysis (Pending integration)
-                    # For now, randomly assign status to simulate mix
-                    disclosures.append({
+                    doc_id = f"{unique_key}-{random.randint(1000,9999)}"
+
+                    new_item = {
                         "id": doc_id,
                         "time": time_str,
                         "code": code,
                         "companyName": company_name,
                         "title": title,
                         "url": pdf_link,
-                        "aiStatus": "pending", 
-                        "importance": "low", # Default to low until analyzed
+                        "aiStatus": "pending", # Default to pending
+                        "importance": "low",
                         "sentiment": "neutral",
-                        "summary": "Waiting for AI analysis...",
+                        "summary": "Pending analysis...",
                         "tags": []
-                    })
+                    }
+                    
+                    new_items.append(new_item)
+                    existing_ids.add(unique_key)
+                    
                 except Exception as row_err:
                     print(f"Error parsing row: {row_err}")
                     continue
         
-        print(f"Scraped {len(disclosures)} items from TDnet.")
-        return disclosures
+        if new_items:
+            print(f"Found {len(new_items)} new items.")
+            # Prepend new items to store
+            DISCLOSURE_STORE = new_items + DISCLOSURE_STORE
+            save_data(DISCLOSURE_STORE)
+            return True # Indicates new data found
+            
+        return False
 
     except Exception as e:
         print(f"Error scraping TDnet: {e}")
-        return []
+        return False
 
 @app.get("/api/disclosures", response_model=List[Disclosure])
-def get_disclosures():
+def get_disclosures(background_tasks: BackgroundTasks):
+    global DISCLOSURE_STORE
+    
     today = datetime.datetime.now().strftime("%Y%m%d")
-    real_data = scrape_tdnet(today)
     
-    if not real_data:
-        # If no data for today (e.g., early morning), try yesterday
-        yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y%m%d")
-        print(f"No data for {today}, trying {yesterday}...")
-        real_data = scrape_tdnet(yesterday)
-
-    if real_data:
-        return real_data
+    # Trigger scrape (lightweight)
+    has_new_data = scrape_tdnet(today)
     
-    # Fallback to mock data
-    return MOCK_DISCLOSURES
+    # If store is empty, try yesterday
+    if not DISCLOSURE_STORE:
+         yesterday = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y%m%d")
+         has_new_data = scrape_tdnet(yesterday) or has_new_data
+    
+    # Trigger background analysis if new data found OR if there are pending items
+    pending_count = sum(1 for item in DISCLOSURE_STORE if item.get("aiStatus") == "pending")
+    if has_new_data or pending_count > 0:
+        background_tasks.add_task(process_analysis_queue)
+    
+    return DISCLOSURE_STORE
 
 @app.get("/")
 def read_root():

@@ -121,6 +121,16 @@ export default function Home() {
                             🤖 {item.summary}
                           </p>
                         )}
+                        {item.aiStatus === "pending" && (
+                          <p className="text-sm text-zinc-500 italic line-clamp-1">
+                            ⏳ 解析中...
+                          </p>
+                        )}
+                        {item.aiStatus === "error" && (
+                          <p className="text-sm text-red-400/80 line-clamp-1">
+                            ⚠️ 解析失敗
+                          </p>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>
